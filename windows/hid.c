@@ -510,12 +510,43 @@ static void hid_internal_get_info(const wchar_t* interface_path, struct hid_devi
 		/* Normalize to upper case */
 		for (wchar_t* p = compatible_id; *p; ++p) *p = towupper(*p);
 
+		/* USB devices
+		   https://docs.microsoft.com/windows-hardware/drivers/hid/plug-and-play-support
+		   https://docs.microsoft.com/windows-hardware/drivers/install/standard-usb-identifiers */
+		if (wcsstr(compatible_id, L"USB") != NULL) {
+			dev->bus_type = HID_API_BUS_USB;
+			break;
+		}
+
+		/* Bluetooth devices
+		   https://docs.microsoft.com/windows-hardware/drivers/bluetooth/installing-a-bluetooth-device */
+		if (wcsstr(compatible_id, L"BTHENUM") != NULL) {
+			dev->bus_type = HID_API_BUS_BLUETOOTH;
+			break;
+		}
+
 		/* Bluetooth LE devices */
 		if (wcsstr(compatible_id, L"BTHLEDEVICE") != NULL) {
 			/* HidD_GetProductString/HidD_GetManufacturerString/HidD_GetSerialNumberString is not working for BLE HID devices
 			   Request this info via dev node properties instead.
 			   https://docs.microsoft.com/answers/questions/401236/hidd-getproductstring-with-ble-hid-device.html */
 			hid_internal_get_ble_info(dev, dev_node);
+
+			dev->bus_type = HID_API_BUS_BLUETOOTH;
+			break;
+		}
+
+		/* I2C devices
+		   https://docs.microsoft.com/windows-hardware/drivers/hid/plug-and-play-support-and-power-management */
+		if (wcsstr(compatible_id, L"PNP0C50") != NULL) {
+			dev->bus_type = HID_API_BUS_I2C;
+			break;
+		}
+
+		/* SPI devices
+		   https://docs.microsoft.com/windows-hardware/drivers/hid/plug-and-play-for-spi */
+		if (wcsstr(compatible_id, L"PNP0C51") != NULL) {
+			dev->bus_type = HID_API_BUS_SPI;
 			break;
 		}
 	}
@@ -1141,13 +1172,13 @@ void HID_API_EXPORT HID_API_CALL hid_close(hid_device *dev)
 
 int HID_API_EXPORT_CALL HID_API_CALL hid_get_manufacturer_string(hid_device *dev, wchar_t *string, size_t maxlen)
 {
-	if (!dev->device_info) {
-		register_string_error(dev, L"NULL device info");
+	if (!string || !maxlen) {
+		register_string_error(dev, L"Zero buffer/length");
 		return -1;
 	}
 
-	if (!string || !maxlen) {
-		register_string_error(dev, L"Zero buffer/length");
+	if (!dev->device_info) {
+		register_string_error(dev, L"NULL device info");
 		return -1;
 	}
 
@@ -1161,13 +1192,13 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_manufacturer_string(hid_device *dev
 
 int HID_API_EXPORT_CALL HID_API_CALL hid_get_product_string(hid_device *dev, wchar_t *string, size_t maxlen)
 {
-	if (!dev->device_info) {
-		register_string_error(dev, L"NULL device info");
+	if (!string || !maxlen) {
+		register_string_error(dev, L"Zero buffer/length");
 		return -1;
 	}
 
-	if (!string || !maxlen) {
-		register_string_error(dev, L"Zero buffer/length");
+	if (!dev->device_info) {
+		register_string_error(dev, L"NULL device info");
 		return -1;
 	}
 
@@ -1181,13 +1212,13 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_product_string(hid_device *dev, wch
 
 int HID_API_EXPORT_CALL HID_API_CALL hid_get_serial_number_string(hid_device *dev, wchar_t *string, size_t maxlen)
 {
-	if (!dev->device_info) {
-		register_string_error(dev, L"NULL device info");
+	if (!string || !maxlen) {
+		register_string_error(dev, L"Zero buffer/length");
 		return -1;
 	}
 
-	if (!string || !maxlen) {
-		register_string_error(dev, L"Zero buffer/length");
+	if (!dev->device_info) {
+		register_string_error(dev, L"NULL device info");
 		return -1;
 	}
 
@@ -1197,6 +1228,16 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_serial_number_string(hid_device *de
 	register_string_error(dev, NULL);
 
 	return 0;
+}
+
+HID_API_EXPORT struct hid_device_info * HID_API_CALL hid_get_device_info(hid_device *dev) {
+	if (!dev->device_info)
+	{
+		register_string_error(dev, L"NULL device info");
+		return NULL;
+	}
+
+	return dev->device_info;
 }
 
 int HID_API_EXPORT_CALL HID_API_CALL hid_get_indexed_string(hid_device *dev, int string_index, wchar_t *string, size_t maxlen)
