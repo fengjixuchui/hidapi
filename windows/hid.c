@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#include "hidapi.h"
+#include "hidapi_winapi.h"
 
 #include <windows.h>
 
@@ -409,32 +409,46 @@ static void* hid_internal_get_device_interface_property(const wchar_t* interface
 	return property_value;
 }
 
+/* HidD_GetProductString/HidD_GetManufacturerString/HidD_GetSerialNumberString is not working for BLE HID devices
+   Request this info via dev node properties instead.
+   https://docs.microsoft.com/answers/questions/401236/hidd-getproductstring-with-ble-hid-device.html
+*/
 static void hid_internal_get_ble_info(struct hid_device_info* dev, DEVINST dev_node)
 {
-	wchar_t *manufacturer_string, *serial_number, *product_string;
-	/* Manufacturer String */
-	manufacturer_string = hid_internal_get_devnode_property(dev_node, (const DEVPROPKEY*)&PKEY_DeviceInterface_Bluetooth_Manufacturer, DEVPROP_TYPE_STRING);
-	if (manufacturer_string) {
-		free(dev->manufacturer_string);
-		dev->manufacturer_string = manufacturer_string;
+	if (wcslen(dev->manufacturer_string) == 0) {
+		/* Manufacturer Name String (UUID: 0x2A29) */
+		wchar_t* manufacturer_string = hid_internal_get_devnode_property(dev_node, (const DEVPROPKEY*)&PKEY_DeviceInterface_Bluetooth_Manufacturer, DEVPROP_TYPE_STRING);
+		if (manufacturer_string) {
+			free(dev->manufacturer_string);
+			dev->manufacturer_string = manufacturer_string;
+		}
 	}
 
-	/* Serial Number String (MAC Address) */
-	serial_number = hid_internal_get_devnode_property(dev_node, (const DEVPROPKEY*)&PKEY_DeviceInterface_Bluetooth_DeviceAddress, DEVPROP_TYPE_STRING);
-	if (serial_number) {
-		free(dev->serial_number);
-		dev->serial_number = serial_number;
+	if (wcslen(dev->serial_number) == 0) {
+		/* Serial Number String (UUID: 0x2A25) */
+		wchar_t* serial_number = hid_internal_get_devnode_property(dev_node, (const DEVPROPKEY*)&PKEY_DeviceInterface_Bluetooth_DeviceAddress, DEVPROP_TYPE_STRING);
+		if (serial_number) {
+			free(dev->serial_number);
+			dev->serial_number = serial_number;
+		}
 	}
 
-	/* Get devnode grandparent to reach out Bluetooth LE device node */
-	if (CM_Get_Parent(&dev_node, dev_node, 0) != CR_SUCCESS)
-		return;
+	if (wcslen(dev->product_string) == 0) {
+		/* Model Number String (UUID: 0x2A24) */
+		wchar_t* product_string = hid_internal_get_devnode_property(dev_node, (const DEVPROPKEY*)&PKEY_DeviceInterface_Bluetooth_ModelNumber, DEVPROP_TYPE_STRING);
+		if (!product_string) {
+			DEVINST parent_dev_node = 0;
+			/* Fallback: Get devnode grandparent to reach out Bluetooth LE device node */
+			if (CM_Get_Parent(&parent_dev_node, dev_node, 0) == CR_SUCCESS) {
+				/* Device Name (UUID: 0x2A00) */
+				product_string = hid_internal_get_devnode_property(parent_dev_node, &DEVPKEY_NAME, DEVPROP_TYPE_STRING);
+			}
+		}
 
-	/* Product String */
-	product_string = hid_internal_get_devnode_property(dev_node, &DEVPKEY_NAME, DEVPROP_TYPE_STRING);
-	if (product_string) {
-		free(dev->product_string);
-		dev->product_string = product_string;
+		if (product_string) {
+			free(dev->product_string);
+			dev->product_string = product_string;
+		}
 	}
 }
 
@@ -527,12 +541,8 @@ static void hid_internal_get_info(const wchar_t* interface_path, struct hid_devi
 
 		/* Bluetooth LE devices */
 		if (wcsstr(compatible_id, L"BTHLEDEVICE") != NULL) {
-			/* HidD_GetProductString/HidD_GetManufacturerString/HidD_GetSerialNumberString is not working for BLE HID devices
-			   Request this info via dev node properties instead.
-			   https://docs.microsoft.com/answers/questions/401236/hidd-getproductstring-with-ble-hid-device.html */
-			hid_internal_get_ble_info(dev, dev_node);
-
 			dev->bus_type = HID_API_BUS_BLUETOOTH;
+			hid_internal_get_ble_info(dev, dev_node);
 			break;
 		}
 
@@ -1307,6 +1317,22 @@ end:
 }
 
 
+int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device *dev, unsigned char *buf, size_t buf_size)
+{
+	PHIDP_PREPARSED_DATA pp_data = NULL;
+
+	if (!HidD_GetPreparsedData(dev->device_handle, &pp_data) || pp_data == NULL) {
+		register_string_error(dev, L"HidD_GetPreparsedData");
+		return -1;
+	}
+
+	int res = hid_winapi_descriptor_reconstruct_pp_data(pp_data, buf, buf_size);
+
+	HidD_FreePreparsedData(pp_data);
+
+	return res;
+}
+
 HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)
 {
 	if (dev) {
@@ -1319,6 +1345,10 @@ HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)
 		return L"Success";
 	return last_global_error_str;
 }
+
+#ifndef hidapi_winapi_EXPORTS
+#include "hidapi_descriptor_reconstruct.c"
+#endif
 
 #ifdef __cplusplus
 } /* extern "C" */

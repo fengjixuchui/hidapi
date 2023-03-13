@@ -26,6 +26,9 @@ project(hidapi VERSION "${VERSION}" LANGUAGES C)
 
 # Defaults and required options
 
+if(NOT DEFINED HIDAPI_WITH_TESTS)
+    set(HIDAPI_WITH_TESTS OFF)
+endif()
 if(NOT DEFINED BUILD_SHARED_LIBS)
     set(BUILD_SHARED_LIBS ON)
 endif()
@@ -78,8 +81,14 @@ endif()
 add_library(hidapi_include INTERFACE)
 target_include_directories(hidapi_include INTERFACE
     "$<BUILD_INTERFACE:${PROJECT_ROOT}/hidapi>"
-    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hidapi>"
 )
+if(APPLE AND CMAKE_FRAMEWORK)
+    # FIXME: https://github.com/libusb/hidapi/issues/492: it is untrivial to set the include path for Framework correctly
+else()
+    target_include_directories(hidapi_include INTERFACE
+        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hidapi>"
+    )
+endif()
 set_target_properties(hidapi_include PROPERTIES EXPORT_NAME "include")
 set(HIDAPI_PUBLIC_HEADERS "${PROJECT_ROOT}/hidapi/hidapi.h")
 
